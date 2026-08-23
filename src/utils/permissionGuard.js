@@ -5,6 +5,19 @@ import { logger } from './logger.js';
 import { replyUserError, ErrorTypes } from './errorHandler.js';
 import { isBotOwner, getBotMessage } from '../config/bot.js';
 
+// RESTRICTED USER ID - Only this user can use commands
+const RESTRICTED_USER_ID = '461772532807237632';
+
+/**
+ * Check if user has access to use commands
+ * @param {string} userId
+ * @returns {boolean}
+ */
+export function isUserAllowed(userId) {
+  if (!userId) return false;
+  return String(userId) === RESTRICTED_USER_ID;
+}
+
 /**
  * Read default_member_permissions from a SlashCommandBuilder (or its JSON).
  * @param {import('discord.js').SlashCommandBuilder | object} commandData
@@ -146,9 +159,33 @@ export async function checkModerationPermissions(
 /**
  * Enforce a command's default_member_permissions for prefix (and other non-Discord-gated) invocations.
  * Slash commands are gated by Discord, but prefix commands must mirror the same requirement in code.
+ * IMPORTANT: ALL commands now require the restricted user ID to execute.
  * @returns {Promise<boolean>} true when the member may proceed
  */
 export async function enforceDefaultCommandPermissions(interaction, command, context = {}) {
+  // FIRST CHECK: User must be the restricted user ID
+  if (!isUserAllowed(interaction.user?.id)) {
+    await replyUserError(interaction, {
+      type: ErrorTypes.PERMISSION,
+      message: 'You do not have permission to use this command.',
+      context: {
+        source: 'permissionGuard.enforceDefaultCommandPermissions',
+        reason: 'restricted_user_only',
+      },
+    });
+
+    logger.warn('[PERMISSION_DENIED] Restricted user check failed', {
+      userId: interaction.user?.id,
+      guildId: interaction.guildId,
+      command: interaction.commandName,
+      restrictedUserId: RESTRICTED_USER_ID,
+    });
+
+    return false;
+  }
+
+  // If the restricted user passes, allow them through
+  // (they have permission to run any command)
   if (isBotOwner(interaction.user?.id)) {
     return true;
   }
@@ -314,6 +351,7 @@ export function auditPermissionCheck(userId, action, allowed, reason = null) {
 }
 
 export default {
+  isUserAllowed,
   isAdmin,
   isModerator,
   hasPermission,
