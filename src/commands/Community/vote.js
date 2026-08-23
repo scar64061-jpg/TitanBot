@@ -192,7 +192,7 @@ export default {
                 },
                 {
                     name: 'Required Votes',
-                    value: `${customThreshold} ✅`,
+                    value: `${customThreshold} ${TICK_EMOJI}`,
                     inline: true
                 }
             )
@@ -215,6 +215,7 @@ export default {
         let messageReply;
         try {
             messageReply = await InteractionHelper.safeEditReply(interaction, { embeds: [embed] });
+            logger.info(`Vote message created: ${messageReply.id}`);
         } catch (error) {
             logger.error('Failed to send vote message:', error);
             return await replyUserError(interaction, { type: ErrorTypes.UNKNOWN, message: 'Failed to create vote message.' });
@@ -234,17 +235,41 @@ export default {
         };
         voteMessages.set(messageReply.id, voteData);
 
-        // React with tick and X - CRITICAL: Must happen AFTER tracking is set up
+        // React with tick and X - with retry logic
+        let reactionsAdded = false;
         try {
+            // Add a small delay to ensure message is fully processed
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            logger.info(`Attempting to add reactions to message ${messageReply.id}`);
             await messageReply.react(TICK_EMOJI);
+            logger.info(`Successfully added first reaction (${TICK_EMOJI})`);
+            
+            await new Promise(resolve => setTimeout(resolve, 200));
+            
             await messageReply.react(X_EMOJI);
-            logger.info(`Added reactions to vote message ${messageReply.id}`);
+            logger.info(`Successfully added second reaction (${X_EMOJI})`);
+            
+            reactionsAdded = true;
         } catch (error) {
-            logger.error('Failed to add reactions to vote message:', error);
+            logger.error('Failed to add reactions to vote message:', {
+                error: error.message,
+                code: error.code,
+                messageId: messageReply.id,
+                guildId: interaction.guild.id
+            });
             voteMessages.delete(messageReply.id);
             return await replyUserError(interaction, { 
                 type: ErrorTypes.UNKNOWN, 
-                message: 'Failed to add reactions. Make sure the bot has permission to add reactions.' 
+                message: `Failed to add reactions. Error: ${error.message}. Make sure the bot has permission to add reactions.` 
+            });
+        }
+
+        if (!reactionsAdded) {
+            voteMessages.delete(messageReply.id);
+            return await replyUserError(interaction, { 
+                type: ErrorTypes.UNKNOWN, 
+                message: 'Failed to add reactions to the vote message.' 
             });
         }
 
